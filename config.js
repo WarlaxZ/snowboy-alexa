@@ -1,6 +1,7 @@
 var config = {
-    clientId: "set_me",
-    clientSecret: "set_me",
+    clientId: "amzn1.application-oa2-client.2f827bdb40ae4e5caa20ae1ebce6d571",
+    clientSecret: "bcacb749503bbbeba15a50ead2ee8090b0704b5c24e098255ac236b6805e3839",
+    refresh_token: "Atzr|IQEBLjAsAhQ_BtZ0I_kHGZjUkkJl8Du8R6jmbgIUSemD_sozaf2vUBMWO8KQ94poeK7bc4o9IUg2EqrZ-9AH-8hCZ8qX80aER9Sj6ilXyQSvRrivnudQvNigOiiOMBaN9zRMF79V7OwKjDJCU-KpqgVNBOxyWslEjzFFpol4cwkup8XRjKru7QEi65IM1S1bQvpO1S8skIYoB9uROiAiMZU4br7E_THbz1zRctcmq_8fjHP8w19kzuUF6_oZ1EJy8MldJvxrGn3prsq2WoNAChJ5SPukfhh0vNMJv-MmfXL6DwqtKqT0b4Lqyl3vjucwWFXD-PSkOF9U2J2vHANgu06AvCGSjHbavo6FCOatv7JVxbvPCqULx-CLy4wCXOO62XEtyT82RJ2ZXvjS7zpRJnBa0GX8PT7NCUtkOlHFoBhfkFmpu6WyMnxzfoxINaGDSUTONaraHnlbRwbb2pDz1gnOrmMPPA-POKRp2AUdykl2Q2cYZoTt-uTiwS1nHGankV2rJhG-jc7j_TYuLjrv1y4Ycw",
     deviceId: "MyPi3",
     deviceSerialNumber: 123
 };

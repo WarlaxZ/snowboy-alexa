@@ -1,46 +1,29 @@
 "use strict";
 
-const SnowboyDetect = require('snowboy');
-const record = require('node-record-lpcm16');
-const AVS = require('alexa-voice-service');
-const config = require('config');
+const record = require("node-record-lpcm16");
+const {Detector, Models} = require("snowboy");
+var FormData = require('form-data');
+const models = new Models();
 
-const avs = new AVS({
-    debug: true,
-    clientId: config.clientId,
-    clientSecret: config.clientSecret,
-    deviceId: config.deviceId,
-    deviceSerialNumber: config.deviceSerialNumber
+const config = require("./config");
+
+var http = require("http");
+var fs = require("fs");
+
+
+models.add({
+  file: 'resources/Alexa.pmdl',
+  sensitivity: '0.5',
+  hotwords : 'alexa'
 });
-
-var http = require('http');
-var fs = require('fs');
-
-
-var token = "set_me";
-var refreshToken = "set_me";
-fs.readFile( __dirname + '/token_cache.txt', function (err, data) {
-    if (err) {
-        throw err; 
-    }
-    refreshToken = data.toString();
-    avs.getTokenFromRefreshToken(refreshToken).then(function(responseToken) {
-        token = responseToken;
-    });
-});
-
-avs.requestMic();
-
-
-const d = new SnowboyDetect({
+const d = new Detector({
     resource: "resources/common.res",
-    model: "resources/Alexa.pmdl",
-    sensitivity: "0.5",
+    models: models,
     audioGain: 2.0
 });
 
 d.on('silence', function() {
-    console.log('silence');
+    console.log("silence");
     if (noiseCount > 1) {
         console.log("Done recording");
         stopRecording();
@@ -48,7 +31,7 @@ d.on('silence', function() {
     noiseCount = 0;
 });
 
-d.on('noise', function() {
+d.on('sound', function() {
     console.log('noise');
     noiseCount += 1;
 });
@@ -63,14 +46,13 @@ d.on('hotword', function(index, a, b, c) {
 
     if (!isRecording) {
         isRecording = true;
-        avs.startRecording();
         file = fs.createWriteStream('recording.wav', {
             encoding: 'binary'
         });
         r.pipe(file);
         console.log("Start recording");
         setTimeout(function() {
-            stopRecording()
+            stopRecording();
         }, 10000); //Max recording for 10 seconds before stopping
     }
 });
@@ -83,129 +65,125 @@ function stopRecording() {
     if (isRecording) {
         r.unpipe(file);
         file.close();
+
         console.log("Sending recording to amazon goes here!");
         isRecording = false;
 
-        avs.stopRecording().then(dataView => {
-            avs.player.emptyQueue()
-                .then(() => avs.audioToBlob(dataView))
-                .then(blob => logAudioBlob(blob, 'VOICE'))
-                .then(() => avs.player.enqueue(dataView))
-                .then(() => avs.player.play())
-                .catch(error => {
-                    console.error(error);
-                });
 
-            var ab = false;
-            //sendBlob(blob);
-            avs.sendAudio(dataView)
-                .then(({
-                    xhr,
-                    response
-                }) => {
+      const xhr = new XMLHttpRequest();
+      const url = 'https://access-alexa-na.amazon.com/v1/avs/speechrecognizer/recognize';
 
-                    var promises = [];
-                    var audioMap = {};
-                    var directives = null;
+      xhr.open('POST', url, true);
+      xhr.responseType = 'arraybuffer';
+      xhr.onload = (event) => {
+        const buffer = new Buffer(xhr.response);
 
-                    if (response.multipart.length) {
-                        response.multipart.forEach(multipart => {
-                            let body = multipart.body;
-                            if (multipart.headers && multipart.headers['Content-Type'] === 'application/json') {
-                                try {
-                                    body = JSON.parse(body);
-                                } catch (error) {
-                                    console.error(error);
-                                }
+        if (xhr.status === 200) {
+          const parsedMessage = httpMessageParser(buffer);
+          resolve({xhr, response: parsedMessage});
+        } else {
+          let error = new Error('An error occured with request.');
+          let response = {};
 
-                                if (body && body.messageBody && body.messageBody.directives) {
-                                    directives = body.messageBody.directives;
-                                }
-                            } else if (multipart.headers['Content-Type'] === 'audio/mpeg') {
-                                const start = multipart.meta.body.byteOffset.start;
-                                const end = multipart.meta.body.byteOffset.end;
+          if (!xhr.response.byteLength) {
+            error = new Error('Empty response.');
+          } else {
+            try {
+              response = JSON.parse(arrayBufferToString(buffer));
+            } catch(err) {
+              error = err;
+            }
+          }
 
-                                /**
-                                 * Not sure if bug in buffer module or in http message parser
-                                 * because it's joining arraybuffers so I have to this to
-                                 * seperate them out.
-                                 */
-                                var slicedBody = xhr.response.slice(start, end);
+          if (response.error instanceof Object) {
+            // if (response.error.code === AMAZON_ERROR_CODES.InvalidAccessTokenException) {
+            //   this.emit(AVS.EventTypes.TOKEN_INVALID);
+            // }
+            console.log(response.error);
+            error = response.error.message;
+          }
+        }
+      };
 
-                                //promises.push(avs.player.enqueue(slicedBody));
-                                audioMap[multipart.headers['Content-ID']] = slicedBody;
-                            }
-                        });
+      xhr.onerror = (error) => {
+        console.log(error);
+      };
 
-                        function findAudioFromContentId(contentId) {
-                            contentId = contentId.replace('cid:', '');
-                            for (var key in audioMap) {
-                                if (key.indexOf(contentId) > -1) {
-                                    return audioMap[key];
-                                }
-                            }
-                        }
+      const BOUNDARY = 'BOUNDARY1234';
+      const BOUNDARY_DASHES = '--';
+      const NEWLINE = '\r\n';
+      const METADATA_CONTENT_DISPOSITION = 'Content-Disposition: form-data; name="metadata"';
+      const METADATA_CONTENT_TYPE = 'Content-Type: application/json; charset=UTF-8';
+      const AUDIO_CONTENT_TYPE = 'Content-Type: audio/L16; rate=16000; channels=1';
+      const AUDIO_CONTENT_DISPOSITION = 'Content-Disposition: form-data; name="audio"';
 
-                        directives.forEach(directive => {
-                            if (directive.namespace === 'SpeechSynthesizer') {
-                                if (directive.name === 'speak') {
-                                    const contentId = directive.payload.audioContent;
-                                    const audio = findAudioFromContentId(contentId);
-                                    if (audio) {
-                                        avs.audioToBlob(audio)
-                                            .then(blob => logAudioBlob(blob, 'RESPONSE'));
-                                        promises.push(avs.player.enqueue(audio));
-                                    }
-                                }
-                            } else if (directive.namespace === 'AudioPlayer') {
-                                if (directive.name === 'play') {
-                                    const streams = directive.payload.audioItem.streams;
-                                    streams.forEach(stream => {
-                                        const streamUrl = stream.streamUrl;
+      const metadata = {
+        messageHeader: {},
+        messageBody: {
+          profile: 'alexa-close-talk',
+          locale: 'en-us',
+          format: 'audio/L16; rate=16000; channels=1'
+        }
+      };
 
-                                        const audio = findAudioFromContentId(streamUrl);
-                                        if (audio) {
-                                            avs.audioToBlob(audio)
-                                                .then(blob => logAudioBlob(blob, 'RESPONSE'));
-                                            promises.push(avs.player.enqueue(audio));
-                                        } else if (streamUrl.indexOf('http') > -1) {
-                                            const xhr = new XMLHttpRequest();
-                                            const url = `/parse-m3u?url=${streamUrl.replace(/!.*$/, '')}`;
-                                            xhr.open('GET', url, true);
-                                            xhr.responseType = 'json';
-                                            xhr.onload = (event) => {
-                                                const urls = event.currentTarget.response;
+      const postDataStart = [
+        NEWLINE, BOUNDARY_DASHES, BOUNDARY, NEWLINE, METADATA_CONTENT_DISPOSITION, NEWLINE, METADATA_CONTENT_TYPE,
+        NEWLINE, NEWLINE, JSON.stringify(metadata), NEWLINE, BOUNDARY_DASHES, BOUNDARY, NEWLINE,
+        AUDIO_CONTENT_DISPOSITION, NEWLINE, AUDIO_CONTENT_TYPE, NEWLINE, NEWLINE
+      ].join('');
 
-                                                urls.forEach(url => {
-                                                    avs.player.enqueue(url);
-                                                });
-                                            };
-                                            xhr.send();
-                                        }
-                                    });
-                                } else if (directive.namespace === 'SpeechRecognizer') {
-                                    if (directive.name === 'listen') {
-                                        const timeout = directive.payload.timeoutIntervalInMillis;
-                                        // enable mic
-                                    }
-                                }
-                            }
-                        });
+      const postDataEnd = [NEWLINE, BOUNDARY_DASHES, BOUNDARY, BOUNDARY_DASHES, NEWLINE].join('');
 
-                        if (promises.length) {
-                            Promise.all(promises)
-                                .then(() => {
-                                    avs.player.playQueue()
-                                });
-                        }
-                    }
+      const size = postDataStart.length + dataView.byteLength + postDataEnd.length;
+      const uint8Array = new Uint8Array(size);
+      let i = 0;
 
-                })
-                .catch(error => {
-                    console.error(error);
-                });
+      for (; i < postDataStart.length; i++) {
+        uint8Array[i] = postDataStart.charCodeAt(i) & 0xFF;
+      }
+
+      for (let j = 0; j < dataView.byteLength ; i++, j++) {
+        uint8Array[i] = dataView.getUint8(j);
+      }
+
+      for (let j = 0; j < postDataEnd.length; i++, j++) {
+        uint8Array[i] = postDataEnd.charCodeAt(j) & 0xFF;
+      }
+
+      const payload = uint8Array.buffer;
+
+      xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+      xhr.setRequestHeader('Content-Type', 'multipart/form-data; boundary=' + BOUNDARY);
+      xhr.send(payload);
+
+        /*
+        const url = 'https://access-alexa-na.amazon.com/v1/avs/speechrecognizer/recognize';
+        var formData = new FormData();
+
+        // http.request(url, function(response) {
+        //   formData.append('files', fs.createReadStream('recording.wav'));
+        // });
+
+        formData.append('files', fs.createReadStream('recording.wav'), {
+          "Content-Disposition": "form-data; name=\"audio\"",
+          "Content-Type": "audio/L16; rate=16000; channels=1"
         });
-    });
+        formData.submit({
+          //url: url,
+          host: "access-alexa-na.amazon.com",
+          path: "/v1/avs/speechrecognizer/recognize",
+          headers: {
+            'Authorization': 'Bearer xxxxxxxxxxxx',
+            'Content-Type:': 'multipart/form-data; boundary=BOUNDARY1234'
+          }
+        }, function(err, res) {
+          console.log(err);
+          console.log(res.statusCode);
+          console.log(res);
+        });
+        */
+
+    }
 }
 
 const r = record.start({

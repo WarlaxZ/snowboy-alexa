@@ -19,6 +19,7 @@
   "license": "ISC",
   "dependencies": {
     "alexa-voice-service": "0.0.7",
+    "form-data": "^2.1.0",
     "node-record-lpcm16": "^0.1.4",
     "snowboy": "^1.0.9"
   }
