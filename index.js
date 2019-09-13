@@ -10,6 +10,8 @@ const config = require("./config");
 var http = require("http");
 var fs = require("fs");
 
+var XMLHttpRequest = require("xmlhttprequest").XMLHttpRequest;
+var xhr = new XMLHttpRequest();
 
 models.add({
   file: 'resources/Alexa.pmdl',
